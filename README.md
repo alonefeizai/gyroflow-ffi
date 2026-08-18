@@ -54,4 +54,4 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 ## 源码获取
 
 - gyroflow：<https://github.com/gyroflow/gyroflow>
-- 本 crate：请在 App「设置 → 关于」或上方仓库链接获取
+- 本 crate：<https://github.com/alonefeizai/gyroflow-ffi>
