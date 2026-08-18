@@ -1,0 +1,20 @@
+[package]
+name = "gyroflow_ffi"
+version = "0.1.0"
+authors = ["LutFTP"]
+edition = "2021"
+
+[lib]
+name = "gyroflow_ffi"
+crate-type = ["staticlib"]
+
+[dependencies]
+gyroflow-core = { path = "../参考项目gyroflow-master/src/core" }
+
+# ─── 本地构建配置（非 gyroflow 上游改动）：GitHub 网络不可达时，将
+# telemetry-parser 及其 mp4parse 传递依赖替换为本地 path 依赖
+# （deps/telemetry-parser、deps/mp4parse）。
+# [patch] 只在根包生效，故此处（gyroflow_ffi 为根包）必须声明。
+# 仅影响依赖解析，不修改任何算法/业务代码。有网络时删除本段即可恢复原状。
+[patch."https://github.com/AdrianEddy/telemetry-parser.git"]
+telemetry-parser = { path = "../deps/telemetry-parser" }
