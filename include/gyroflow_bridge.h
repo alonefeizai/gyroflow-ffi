@@ -39,6 +39,13 @@ int gf_engine_load_video(GFEngine *e, const char *url,
 void gf_engine_set_level(GFEngine *e, int level, double video_speed);
 
 /*
+ * 设置输出方向（video_rotation：0/90/180/270 度）。
+ * gyroflow 渲染时原生旋转输出像素并自动互换输出宽高（90/270 时输出变竖）。
+ * 调用后 App 侧无需再做方向处理；应在 load_video 之后、set_level 之前调用。
+ */
+void gf_engine_set_video_rotation(GFEngine *e, double rotation);
+
+/*
  * 单帧防抖处理。
  * timestamp_us: 原始时间轴微秒（变速时由调用方映射：compositionTime × speed）
  * input, in_stride  : 输入 BGRA 像素指针与行字节数（width×4 ≤ stride）

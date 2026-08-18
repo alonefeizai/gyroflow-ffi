@@ -210,6 +210,34 @@ pub unsafe extern "C" fn gf_engine_set_level(
     }
 }
 
+/// 设置 video_rotation（0/90/180/270 度）：gyroflow 内部 image_rotation 旋转输出内容 + IMU 对齐。
+/// 必须随后调用 set_output_size 让输出宽高互换（90/270 → 竖），否则竖画面被挤压到横画布 1/3。
+/// 上层 Swift 侧不得再对防抖帧做 .oriented 旋转（避免双重旋转）。
+#[no_mangle]
+pub unsafe extern "C" fn gf_engine_set_video_rotation(
+    e: *mut GFEngine,
+    rotation: f64,
+) {
+    if e.is_null() {
+        return;
+    }
+    let engine = &(*e).inner;
+    engine.set_video_rotation(rotation);
+    // 关键修复：set_output_size 必须传【互换后】尺寸（90/270 → 竖 (h,w)）。
+    // 之前传横尺寸 (w,h) 会被内部 letterbox 等比缩放（scale=min(ow/w, oh/h)=0.5625），
+    // gyroflow 实际只渲染 2160x1215 → 塞进竖 stabBuffer 后内容占上 1/3 + 黑（1/3 问题根源）。
+    let (w, h) = {
+        let p = engine.params.read();
+        (p.size.0.max(1), p.size.1.max(1))
+    };
+    let r = rotation.abs();
+    let (ow, oh) = if r == 90.0 || r == 270.0 { (h, w) } else { (w, h) };
+    engine.set_output_size(ow, oh);
+    // 阻塞式全量重算（使 video_rotation + 输出尺寸进入渲染侧 compute_params）
+    engine.recompute_blocking();
+    println!("[gyroflow] 已设置 video_rotation={} + set_output_size({}x{})（90/270 互换宽高）", rotation, ow, oh);
+}
+
 /// 单帧防抖处理：in/out 均为 BGRA（stride ≥ width×4，同尺寸）。
 /// timestamp_us 为原始时间轴微秒。
 /// 返回 0=成功；非 0=失败。
@@ -231,12 +259,18 @@ pub unsafe extern "C" fn gf_engine_process_frame(
 
     let w = width.max(1) as usize;
     let h = height.max(1) as usize;
-    let min_stride = (w * 4) as i32;
-    let in_stride = in_stride.max(min_stride) as usize;
-    let out_stride = out_stride.max(min_stride) as usize;
+    let in_stride = in_stride.max((w * 4) as i32) as usize;
+
+    // 输出尺寸取 gyroflow 的 output_size（set_video_rotation 后 90/270 会自动宽高互换为竖），
+    // 与 Swift 侧竖方向的 stabBuffer 匹配；input 保持 sourceBuffer 原始方向（横）。
+    let (ow, oh) = {
+        let p = engine.params.read();
+        (p.output_size.0.max(1), p.output_size.1.max(1))
+    };
+    let out_stride = out_stride.max((ow * 4) as i32) as usize;
 
     let in_len = in_stride * h;
-    let out_len = out_stride * h;
+    let out_len = out_stride * oh;
 
     // gyroflow 的 CPU 输入以 &mut [u8] 表达（实际只读），此处按 FFI 约定转换
     let in_slice: &mut [u8] = std::slice::from_raw_parts_mut(input as *mut u8, in_len);
@@ -253,7 +287,7 @@ pub unsafe extern "C" fn gf_engine_process_frame(
             texture_copy: false,
         },
         output: BufferDescription {
-            size: (w, h, out_stride),
+            size: (ow, oh, out_stride),
             rect: None,
             rotation: None,
             data: BufferSource::Cpu {
@@ -269,6 +303,8 @@ pub unsafe extern "C" fn gf_engine_process_frame(
 
     match engine.process_pixels::<BGRA8>(timestamp_us, None, &mut buffers) {
         Ok(info) => {
+            // 注意：不再做 Y 镜像（video_rotation 方案下 image_rotation 已旋转内容，
+            // 输出尺寸=set_output_size 互换后的竖/横尺寸，Y 镜像会破坏方向）。
             if fc % 60 == 1 {
                 println!("[gyroflow] 帧 {} 防抖诊断: fov={:.4} min_fov={:.4} backend={} (fov<1 表示裁切缩放进行中)",
                          fc, info.fov, info.minimal_fov, info.backend);
