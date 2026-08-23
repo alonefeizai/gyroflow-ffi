@@ -108,7 +108,8 @@ pub unsafe extern "C" fn gf_engine_load_video(
     // ── 相机识别诊断：确认 core 是否识别到机型（A7M5=ILCE-7M5），
     // 为 IMU 180° 补正（gf_engine_set_imu_rotation）提供机型判定依据 ──
     {
-        let md = engine.gyro.read().file_metadata.read();
+        let gyro = engine.gyro.read();
+        let md = gyro.file_metadata.read();
         match md.camera_identifier.as_ref() {
             Some(c) => println!("[gyroflow] 相机识别: {} {}（identifier={}）", c.brand, c.model, c.identifier),
             None => println!("[gyroflow] 相机识别: 未识别到机型（后续 IMU 方向补正无法按机型自动应用）"),
