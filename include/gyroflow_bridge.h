@@ -46,6 +46,15 @@ void gf_engine_set_level(GFEngine *e, int level, double video_speed);
 void gf_engine_set_video_rotation(GFEngine *e, double rotation);
 
 /*
+ * 设置 IMU 旋转（pitch/roll/yaw，单位度）：校正机身 IMU 坐标差异。
+ * 用途：A7M5 等素材若 IMU 元数据与 A7C2 差 180°（绕光轴），gyroflow 稳定输出会整体
+ * 倒立但防抖补偿方向正常；对该类机型调用本函数补 180° 即可转正（绕哪个轴需真机微调）。
+ * 三个角度全为 0 时清除设置（恢复默认；A7C2 等无需设置）。
+ * 应在 load_video 之后、set_level 之前调用。
+ */
+void gf_engine_set_imu_rotation(GFEngine *e, double pitch_deg, double roll_deg, double yaw_deg);
+
+/*
  * 单帧防抖处理。
  * timestamp_us: 原始时间轴微秒（变速时由调用方映射：compositionTime × speed）
  * input, in_stride  : 输入 BGRA 像素指针与行字节数（width×4 ≤ stride）

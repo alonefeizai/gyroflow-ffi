@@ -9,7 +9,7 @@ name = "gyroflow_ffi"
 crate-type = ["staticlib"]
 
 [dependencies]
-gyroflow-core = { path = "../参考项目gyroflow-master/src/core" }
+gyroflow-core = { path = "../gyroflow-master/src/core" }
 
 # ─── 本地构建配置（非 gyroflow 上游改动）：GitHub 网络不可达时，将
 # telemetry-parser 及其 mp4parse 传递依赖替换为本地 path 依赖

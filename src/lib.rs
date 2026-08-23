@@ -14,14 +14,14 @@ use gyroflow_core::stabilization_params::ReadoutDirection;
 use gyroflow_core::StabilizationManager;
 
 /// 防抖级别 → smoothness（平滑时间常数，单位秒；0 位未用）。
-/// 豆包AI 3 档预设：低=电影感少裁切 / 中=日常平衡 / 高=强防抖。
-const SMOOTHNESS: [f64; 4] = [0.0, 0.55, 0.70, 0.85];
+/// 豆包AI 4 档预设：低=电影感少裁切 / 中=日常平衡 / 高=强防抖 / 超高=极限稳定。
+const SMOOTHNESS: [f64; 5] = [0.0, 0.55, 0.70, 0.85, 0.95];
 /// 防抖级别 → adaptive_zoom_window（单位：**秒**，不是百分比！core 默认 4.0s）。
 /// 窗口越大 → fov 平滑越强、裁切跟随越缓。旧值 0.05~0.12 把秒当百分比用，
 /// 等效 1~4 帧窗口，导致动态裁切（fov 曲线）完全失效。
-const ZOOM_WINDOW: [f64; 4] = [0.0, 2.5, 3.5, 5.0];
+const ZOOM_WINDOW: [f64; 5] = [0.0, 2.5, 3.5, 5.0, 6.5];
 /// 防抖级别 → horizon lock 强度（百分比 0~100，core 默认 100）。
-const HORIZON_LOCK: [f64; 4] = [0.0, 60.0, 85.0, 90.0];
+const HORIZON_LOCK: [f64; 5] = [0.0, 60.0, 85.0, 90.0, 95.0];
 
 #[repr(C)]
 pub struct GFEngine {
@@ -105,6 +105,16 @@ pub unsafe extern "C" fn gf_engine_load_video(
         cancel,
     );
 
+    // ── 相机识别诊断：确认 core 是否识别到机型（A7M5=ILCE-7M5），
+    // 为 IMU 180° 补正（gf_engine_set_imu_rotation）提供机型判定依据 ──
+    {
+        let md = engine.gyro.read().file_metadata.read();
+        match md.camera_identifier.as_ref() {
+            Some(c) => println!("[gyroflow] 相机识别: {} {}（identifier={}）", c.brand, c.model, c.identifier),
+            None => println!("[gyroflow] 相机识别: 未识别到机型（后续 IMU 方向补正无法按机型自动应用）"),
+        }
+    }
+
     // ── fov：保持 1.0（不预放大），裁切完全交给 adaptive zoom 自动计算 ──
     // 旧实现按 25mm 参考焦距换算 fov_scale（75mm → 0.6）会强制 1.67x 硬放大：
     // 长焦素材被无谓裁切、广角素材又无裁切余量。gyroflow 的 fov_iterative +
@@ -158,7 +168,7 @@ pub unsafe extern "C" fn gf_engine_load_video(
     }
 }
 
-/// 设置防抖级别（1=低 2=中 3=高）与变速倍率（时间轴映射用）。
+/// 设置防抖级别（1=低 2=中 3=高 4=超高）与变速倍率（时间轴映射用）。
 #[no_mangle]
 pub unsafe extern "C" fn gf_engine_set_level(
     e: *mut GFEngine,
@@ -169,7 +179,7 @@ pub unsafe extern "C" fn gf_engine_set_level(
         return;
     }
     let engine = &(*e).inner;
-    let lvl = level.clamp(1, 3) as usize;
+    let lvl = level.clamp(1, 4) as usize;
 
     engine.set_smoothing_param("smoothness", SMOOTHNESS[lvl]);
     engine.set_adaptive_zoom(ZOOM_WINDOW[lvl]);
@@ -236,6 +246,27 @@ pub unsafe extern "C" fn gf_engine_set_video_rotation(
     // 阻塞式全量重算（使 video_rotation + 输出尺寸进入渲染侧 compute_params）
     engine.recompute_blocking();
     println!("[gyroflow] 已设置 video_rotation={} + set_output_size({}x{})（90/270 互换宽高）", rotation, ow, oh);
+}
+
+/// 设置 IMU 旋转（pitch/roll/yaw，单位度）：校正机身 IMU 坐标差异。
+/// 用途：A7M5 等素材若 IMU 元数据与 A7C2 差 180°（绕光轴），gyroflow 稳定输出会整体
+/// 倒立但防抖补偿方向正常。对该类机型调用本函数补 180° 即可转正（绕哪个轴需真机微调）。
+/// 三个角度全为 0 时清除设置（恢复默认；A7C2 等无需设置，保持 None）。
+/// 应在 load_video 之后、set_level 之前调用；调用后阻塞式重算使旋转生效。
+#[no_mangle]
+pub unsafe extern "C" fn gf_engine_set_imu_rotation(
+    e: *mut GFEngine,
+    pitch_deg: f64,
+    roll_deg: f64,
+    yaw_deg: f64,
+) {
+    if e.is_null() {
+        return;
+    }
+    let engine = &(*e).inner;
+    engine.set_imu_rotation(pitch_deg, roll_deg, yaw_deg);
+    engine.recompute_blocking();
+    println!("[gyroflow] 已设置 IMU 旋转 pitch={} roll={} yaw={}", pitch_deg, roll_deg, yaw_deg);
 }
 
 /// 单帧防抖处理：in/out 均为 BGRA（stride ≥ width×4，同尺寸）。
